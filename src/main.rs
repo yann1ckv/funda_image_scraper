@@ -16,29 +16,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         size: u8,
     }
 
+    // Gets a random user agent (Chrome, Opera, Firefox, Safari, Edge, or IE).
     let rua = get_rua();
 
-    let mut headers = header::HeaderMap::new();
-    headers.insert(
-        header::ACCEPT_LANGUAGE,
-        header::HeaderValue::from_str("gzip, deflate, br")?,
-    );
-    headers.insert(header::USER_AGENT, header::HeaderValue::from_str(&rua)?);
-    headers.insert(
-        header::ORIGIN,
-        header::HeaderValue::from_str("https://www.funda.nl")?,
-    );
-    headers.insert(
-        header::REFERER,
-        header::HeaderValue::from_str("https://www.funda.nl")?,
-    );
-
-    let client = reqwest::Client::builder()
-        .default_headers(headers)
-        .build()?;
+    let client = reqwest::Client::new();
 
     let res = client
-        .get("https://www.funda.nl/koop/amsterdam/huis-42122722-teldershof-78/#overzicht")
+        .get(format!("{}#overzicht", url))
+        .header(header::USER_AGENT, &rua)
+        .header(header::ACCEPT_LANGUAGE, "gzip, deflate, br")
+        .header(header::ORIGIN, "https://www.funda.nl")
+        .header(header::REFERER, "https://www.funda.nl")
         .send()
         .await?;
 
