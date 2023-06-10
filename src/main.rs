@@ -32,14 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let body = res.text().await?;
     let document = Html::parse_document(&body);
-    let image_selector = Selector::parse("li").unwrap();
-    let ul = document.select(&image_selector).next().unwrap();
-
-    println!("{:?}", ul);
+    let image_selector = Selector::parse("img.media-viewer-overview__section-image").unwrap();
     for media_element in document.select(&image_selector) {
-        println!("{:?}", media_element);
-        let title = media_element.text().collect::<Vec<_>>();
-        println!("Title: {}", title[0]);
+        println!("{:?}", media_element.value().attr("data-lazy-srcset"));
     }
     Ok(())
 }
