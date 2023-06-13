@@ -3,7 +3,7 @@ use fake_user_agent::get_rua;
 use mime::Mime;
 use reqwest::{self, header};
 use scraper::{Html, Selector};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::{
@@ -19,12 +19,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .interact_text()
         .unwrap();
 
-    let mut image_url_map: HashMap<u16, Vec<&str>> = HashMap::new();
+    // retrieves the scraped HTML document
+    let document = retrieve_html_document(&url).await?;
+    // returns a hashmap of the images in the HTML document, with the possible resolutions as keys
+    let image_url_map = fill_image_url_map(&document)?;
 
-    let mut document: Html;
+    // initializes a set so unique found resolution types can be added an user is able to
+    // choose between them from the command line
+    let mut resolutions = Vec::from_iter(image_url_map.keys());
+    resolutions.sort();
+
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Image resolution")
+        .items(&resolutions[..])
+        .interact()
+        .unwrap();
+
+    let path: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Folder location")
+        .validate_with(|input: &String| -> Result<(), &str> {
+            if Path::new(input).is_dir() {
+                Ok(())
+            } else {
+                Err("This is not a folder on your machine")
+            }
+        })
+        .interact_text()
+        .unwrap();
+
+    let folder_name: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Image folder name")
+        .interact_text()
+        .unwrap();
+
+    // create the folder in which to store the images
+    create_dir(format!("{}/{}", path, folder_name))?;
+
+    // retrieve the images for the selected resolution
+    let result = image_url_map
+        .get(resolutions[selection])
+        .unwrap()
+        .to_owned();
+
+    let mut counter = 1;
+
+    // download and save the images
+    for image_url in result {
+        let response = reqwest::get(image_url).await?;
+        let headers = response.headers();
+        let content_type = headers.get(header::CONTENT_TYPE).unwrap();
+        let content_type = Mime::from_str(content_type.to_str()?)?;
+
+        let mut file = File::create(format!(
+            "{}/{}/{}.{}",
+            path,
+            folder_name,
+            counter,
+            content_type.subtype()
+        ))
+        .expect("create failed");
+        let mut content = Cursor::new(response.bytes().await?);
+
+        copy(&mut content, &mut file)?;
+        counter += 1;
+    }
+
+    println!("Done storing images in {}/{}", path, folder_name);
+    Ok(())
+}
+
+async fn retrieve_html_document(url: &str) -> Result<Html, Box<dyn std::error::Error>> {
+    let mut document;
 
     let client = reqwest::Client::new();
 
+    // loop until we find the correct HTML document. It can be that a captcha page has been triggered.
+    // We then wait 100ms and try again.
     loop {
         // Gets a random user agent (Chrome, Opera, Firefox, Safari, Edge, or IE).
         let rua = get_rua();
@@ -50,10 +120,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let body = res.text().await?;
         document = Html::parse_document(&body);
+
+        // check for a captcha page
         let check = document
             .html()
             .find("Je bent bijna op de pagina die je zoekt");
 
+        // if no captcha page is found, we break out of the loop, because we retrieved the listing HTML page
         if check.is_none() {
             break;
         }
@@ -61,12 +134,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sleep(Duration::from_millis(100)).await
     }
 
+    Ok(document)
+}
+
+fn fill_image_url_map(
+    document: &Html,
+) -> Result<HashMap<u16, Vec<&str>>, Box<dyn std::error::Error>> {
     let image_selector = Selector::parse("img.media-viewer-overview__section-image").unwrap();
+    let mut image_url_map: HashMap<u16, Vec<&str>> = HashMap::new();
 
-    // initializes a set so unique found resolution types can be added an user is able to
-    // choose between them from the command line
-    let mut resolutions: HashSet<u16> = HashSet::new();
-
+    // go through the found classes and store them in a hashmap where the key is the resolution and the values are the image URLs
     for media_element in document.select(&image_selector) {
         if media_element.value().attr("data-lazy-srcset").is_some() {
             let string = media_element.value().attr("data-lazy-srcset").unwrap();
@@ -87,64 +164,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .entry(resolution)
                     .or_insert(Vec::new())
                     .push(image_url);
-                resolutions.insert(resolution);
             }
         }
     }
 
-    let mut list_of_resolutions = resolutions.into_iter().collect::<Vec<u16>>();
-    list_of_resolutions.sort();
-
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Pick the resolution for the images")
-        .items(&list_of_resolutions[..])
-        .interact()
-        .unwrap();
-
-    let path: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Folder to store the images in")
-        .validate_with(|input: &String| -> Result<(), &str> {
-            if Path::new(input).is_dir() {
-                Ok(())
-            } else {
-                Err("This is a folder on your machine")
-            }
-        })
-        .interact_text()
-        .unwrap();
-
-    let folder_name: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Name of the folder to store the images in")
-        .interact_text()
-        .unwrap();
-
-    create_dir(format!("{}/{}", path, folder_name))?;
-
-    let result = image_url_map
-        .get(&list_of_resolutions[selection])
-        .unwrap()
-        .to_owned();
-
-    let mut counter = 1;
-
-    for image_url in result {
-        let response = reqwest::get(image_url).await?;
-        let headers = response.headers();
-        let content_type = headers.get(header::CONTENT_TYPE).unwrap();
-        let content_type = Mime::from_str(content_type.to_str()?)?;
-
-        let mut file = File::create(format!(
-            "{}/{}/{}.{}",
-            path,
-            folder_name,
-            counter,
-            content_type.subtype()
-        ))
-        .expect("create failed");
-        let mut content = Cursor::new(response.bytes().await?);
-
-        copy(&mut content, &mut file)?;
-        counter += 1;
-    }
-    Ok(())
+    Ok(image_url_map)
 }
