@@ -8,3 +8,6 @@ Build the binary by running `cargo build` and then execute. Or just run by runni
 2. Pick the one of the possible resolutions for the images to be downloaded
 3. Provide a folder in which a new folder will be created
 4. Name the folder in which the images will be stored
+
+![render1686664289303](https://github.com/yann1ckv/funda_image_scraper/assets/1490794/4e127cea-2850-4323-af19-5aee66eb6ea6)
+ 
